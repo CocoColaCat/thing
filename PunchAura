@@ -1,0 +1,256 @@
+getgenv().vars = getgenv().vars or {
+    Enabled = false,
+    MaxDistance = 20,
+    ESPEnabled = true,
+}
+
+getgenv().Main = getgenv().Main or {
+    connections = {},
+    services = {
+        RunService = game:GetService("RunService"),
+        Players = game:GetService("Players"),
+        ReplicatedStorage = game:GetService("ReplicatedStorage"),
+        TweenService = game:GetService("TweenService"),
+        HttpService = game:GetService("HttpService"),
+        UserInputService = game:GetService("UserInputService"),
+        ContextActionService = game:GetService("ContextActionService"),
+        PathfindingService = game:GetService("PathfindingService"),
+        TeleportService = game:GetService("TeleportService"),
+        Lighting = game:GetService("Lighting"),
+        Workspace = game:GetService("Workspace"),
+        StarterGui = game:GetService("StarterGui"),
+        StarterPack = game:GetService("StarterPack"),
+        StarterPlayer = game:GetService("StarterPlayer"),
+        SoundService = game:GetService("SoundService"),
+        CollectionService = game:GetService("CollectionService"),
+        Debris = game:GetService("Debris"),
+        Stats = game:GetService("Stats"),
+        GuiService = game:GetService("GuiService"),
+        MarketplaceService = game:GetService("MarketplaceService"),
+        InsertService = game:GetService("InsertService"),
+        PolicyService = game:GetService("PolicyService"),
+        TextService = game:GetService("TextService"),
+        VirtualInputManager = game:GetService("VirtualInputManager"),
+        ProximityPromptService = game:GetService("ProximityPromptService"),
+        Teams = game:GetService("Teams"),
+        BadgeService = game:GetService("BadgeService"),
+        AnalyticsService = game:GetService("AnalyticsService"),
+    }
+}
+
+-- Disconnect old connections
+for i,v in next,getgenv().Main.connections do
+    v:Disconnect()
+    print("Disconnected:",i,v)
+end
+getgenv().Main.connections = {}
+
+local Services = getgenv().Main.services
+local Players = Services.Players
+local RunService = Services.RunService
+local Teams = Services.Teams
+
+local vars = getgenv().vars
+local lp = Players.LocalPlayer
+
+-- ESP / target state
+local currentTarget = nil
+local currentHighlight = nil
+
+local function clearESP()
+    if currentHighlight then
+        currentHighlight:Destroy()
+        currentHighlight = nil
+    end
+end
+
+local function setTarget(player)
+    if player == currentTarget then return end
+
+    currentTarget = player
+    clearESP()
+
+    if not vars.ESPEnabled then return end
+    if not player or not player.Character then return end
+
+    local char = player.Character
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "VampireTargetESP"
+    highlight.Adornee = char
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    highlight.Parent = char
+
+    currentHighlight = highlight
+end
+
+local function isEnemy(p)
+    if p == lp then return false end
+    if not p.Character then return false end
+    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+    local hum = p.Character:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum.Health <= 0 then return false end
+
+    if Teams and lp.Team and p.Team and p.Team == lp.Team then
+        return false
+    end
+
+    return true
+end
+
+local function getClosestEnemy(maxDistance)
+    local char = lp.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local closestPlayer = nil
+    local closestDist = nil
+
+    for _, plr in next, Players:GetPlayers() do
+        if isEnemy(plr) then
+            local thrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            if thrp then
+                local dist = (hrp.Position - thrp.Position).Magnitude
+                if dist <= maxDistance and (not closestDist or dist < closestDist) then
+                    closestDist = dist
+                    closestPlayer = plr
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local function getVampireRemote()
+    local char = lp.Character
+    if not char then return nil end
+    local vamp = char:FindFirstChild("Vampire")
+    if not vamp then return nil end
+    local remote = vamp:FindFirstChild("VampireEvent")
+    return remote
+end
+
+local function VampireInit()
+    local char = lp.Character or lp.CharacterAdded:Wait()
+    local vamp = char:WaitForChild("Vampire")
+    local remote = vamp:WaitForChild("VampireEvent")
+
+    local initArgs = {"Charging","CancelCharging","Punch"}
+    for _,v in next, initArgs do
+        remote:FireServer(v)
+    end
+end
+
+-- Rayfield v3 UI
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Vampire Helper",
+    LoadingTitle = "Vampire Auto Punch",
+    LoadingSubtitle = "Rayfield v3",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = false,
+    ConfigurationSaving = {
+        Enabled = false,
+        FolderName = nil,
+        FileName = "VampireHelper"
+    },
+    KeySystem = false,
+    KeySettings = {
+        Title = "Vampire Helper",
+        Subtitle = "Key System",
+        Note = "KeySystem disabled",
+        FileName = "VampireHelperKey",
+        SaveKey = false,
+        GrabKeyFromSite = false,
+        Key = {"examplekey"}
+    }
+})
+
+local CombatTab = Window:CreateTab("Vampire", nil)
+CombatTab:CreateSection("Main")
+
+-- Toggle: Auto punch closest enemy
+CombatTab:CreateToggle({
+    Name = "Auto Punch Closest Enemy",
+    CurrentValue = vars.Enabled,
+    Flag = "Vamp_AutoPunch",
+    Callback = function(Value)
+        vars.Enabled = Value
+        if Value then
+            task.spawn(function()
+                pcall(VampireInit)
+            end)
+        else
+            setTarget(nil)
+        end
+    end,
+})
+
+-- Slider: Max distance
+CombatTab:CreateSlider({
+    Name = "Max Distance",
+    Range = {5, 1000},
+    Increment = 1,
+    Suffix = " studs",
+    CurrentValue = vars.MaxDistance,
+    Flag = "Vamp_MaxDistance",
+    Callback = function(Value)
+        vars.MaxDistance = Value
+    end,
+})
+
+-- Toggle: ESP
+CombatTab:CreateToggle({
+    Name = "Show Target ESP",
+    CurrentValue = vars.ESPEnabled,
+    Flag = "Vamp_TargetESP",
+    Callback = function(Value)
+        vars.ESPEnabled = Value
+        if not Value then
+            setTarget(nil)
+        elseif currentTarget then
+            setTarget(currentTarget)
+        end
+    end,
+})
+
+-- Heartbeat loop: auto target + punch
+local hbConn = RunService.Heartbeat:Connect(function()
+    if not vars.Enabled then
+        -- ensure ESP cleared when disabled
+        setTarget(nil)
+        return
+    end
+
+    local char = lp.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local remote = getVampireRemote()
+    if not remote then return end
+
+    local target = getClosestEnemy(vars.MaxDistance or 20)
+    setTarget(target)
+
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+    local args = {"Charging";"CancelCharging";"Punch";}
+for i,v in next,args do 
+game:GetService("Players").LocalPlayer.Character:WaitForChild("Vampire"):WaitForChild("VampireEvent"):FireServer(v)
+end
+        local args = {
+            "PunchHit",
+            {
+                hit = target.Character.HumanoidRootPart
+            }
+        }
+        remote:FireServer(unpack(args))
+    end
+end)
+
+table.insert(getgenv().Main.connections, hbConn)
